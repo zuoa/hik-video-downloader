@@ -12,53 +12,25 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-HAS_FLUENT = False
+HAS_QT_MATERIAL = False
 
 try:
-    from qfluentwidgets import (  # type: ignore
-        BodyLabel,
-        CardWidget,
-        CheckBox,
-        ComboBox,
-        DateTimeEdit,
-        FluentIcon,
-        InfoBar,
-        InfoBarPosition,
-        LineEdit,
-        PasswordLineEdit,
-        PrimaryPushButton,
-        ProgressBar,
-        PushButton,
-        SpinBox,
-        StrongBodyLabel,
-        SubtitleLabel,
-        TextEdit,
-        Theme,
-        setTheme,
-        setThemeColor,
-    )
+    from qt_material import apply_stylesheet  # type: ignore
 
-    HAS_FLUENT = True
-except Exception:  # noqa: BLE001 - fallback keeps the app usable without the optional UI package
-    BodyLabel = StrongBodyLabel = SubtitleLabel = None
-    CardWidget = QWidget
-    CheckBox = QCheckBox
-    ComboBox = QComboBox
-    DateTimeEdit = QDateTimeEdit
-    LineEdit = QLineEdit
-    PasswordLineEdit = QLineEdit
-    PrimaryPushButton = PushButton = QPushButton
-    ProgressBar = QProgressBar
-    SpinBox = QSpinBox
-    TextEdit = QTextEdit
-    FluentIcon = None
-    InfoBar = None
-    InfoBarPosition = None
-    Theme = None
+    HAS_QT_MATERIAL = True
+except ImportError:
 
-    def setTheme(_theme) -> None:
+    def apply_stylesheet(app, theme: str = "", **kwargs) -> None:
         return None
 
-    def setThemeColor(_color: str) -> None:
-        return None
 
+CardWidget = QWidget
+CheckBox = QCheckBox
+ComboBox = QComboBox
+DateTimeEdit = QDateTimeEdit
+LineEdit = QLineEdit
+PasswordLineEdit = QLineEdit
+PrimaryPushButton = PushButton = QPushButton
+ProgressBar = QProgressBar
+SpinBox = QSpinBox
+TextEdit = QTextEdit

@@ -29,22 +29,16 @@ from PySide6.QtWidgets import (
 
 from .models import ChannelInfo, DownloadStatus, DownloadTask, NvrConnection, RecordingItem, RecordingQuery
 from .ui_compat import (
-    HAS_FLUENT,
-    BodyLabel,
     CardWidget,
     CheckBox,
+    ComboBox,
     DateTimeEdit,
     LineEdit,
     PasswordLineEdit,
     PrimaryPushButton,
     PushButton,
     SpinBox,
-    StrongBodyLabel,
-    SubtitleLabel,
     TextEdit,
-    Theme,
-    setTheme,
-    setThemeColor,
 )
 from .workers import DownloadCancelled, download_worker
 
@@ -191,10 +185,7 @@ class MainWindow(QMainWindow):
         self.thread_pool = QThreadPool.globalInstance()
         self.recordings: list[RecordingItem] = []
         self._task_widgets: dict[str, DownloadTaskItem] = {}
-
-        if HAS_FLUENT:
-            setTheme(Theme.AUTO)
-            setThemeColor("#0f766e")
+        self._output_dir = Path.home() / "Downloads" / "hik-recordings"
 
         self._build_ui()
         self._set_idle_state()
@@ -204,21 +195,37 @@ class MainWindow(QMainWindow):
         root.setObjectName("root")
         layout = QVBoxLayout(root)
         layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
+        layout.setSpacing(12)
 
+        # ── Title bar with download directory config ──
         title_row = QHBoxLayout()
         title_row.addWidget(self._label("海康 NVR 录像下载", "title"))
         title_row.addStretch(1)
+        dir_label = self._label("保存目录", "body")
+        title_row.addWidget(dir_label)
+        self.output_display = QLabel(str(self._output_dir))
+        self.output_display.setObjectName("dirPath")
+        self.output_display.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.output_display.setToolTip("点击更改保存目录")
+        self.output_display.mousePressEvent = lambda _e: self._pick_output_dir()
+        title_row.addWidget(self.output_display)
+        title_row.addSpacing(16)
         self.connection_status = self._label("未连接", "body")
         self.connection_status.setObjectName("statusLabel")
         title_row.addWidget(self.connection_status)
         layout.addLayout(title_row)
 
-        form_card = self._card()
-        form_layout = QGridLayout(form_card)
-        form_layout.setContentsMargins(18, 16, 18, 16)
-        form_layout.setHorizontalSpacing(16)
-        form_layout.setVerticalSpacing(12)
+        # ── Top row: Connection + Search side by side ──
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
+
+        # Card 1: Connection settings
+        conn_card = self._card()
+        conn_layout = QGridLayout(conn_card)
+        conn_layout.setContentsMargins(16, 14, 16, 14)
+        conn_layout.setHorizontalSpacing(12)
+        conn_layout.setVerticalSpacing(10)
+        conn_layout.addWidget(self._label("连接设置", "section"), 0, 0, 1, 5)
 
         self.host_input = LineEdit()
         self.host_input.setPlaceholderText("192.168.1.64")
@@ -230,6 +237,29 @@ class MainWindow(QMainWindow):
         self.user_input.setText("admin")
         self.password_input = PasswordLineEdit()
         self.password_input.setEchoMode(LineEdit.EchoMode.Password)
+        self.test_button = PrimaryPushButton("测试连接")
+        self.test_button.setObjectName("primaryButton")
+        self.test_button.clicked.connect(self._test_connection)
+
+        self._add_form_row(conn_layout, 1, "主机", self.host_input)
+        self._add_form_row(conn_layout, 1, "端口", self.port_input, column=2)
+        conn_layout.addWidget(self.https_check, 1, 4)
+        self._add_form_row(conn_layout, 2, "用户名", self.user_input)
+        self._add_form_row(conn_layout, 2, "密码", self.password_input, column=2)
+        conn_btn_row = QHBoxLayout()
+        conn_btn_row.addStretch(1)
+        conn_btn_row.addWidget(self.test_button)
+        conn_layout.addLayout(conn_btn_row, 3, 0, 1, 5)
+        top_row.addWidget(conn_card, 2)
+
+        # Card 2: Search criteria
+        search_card = self._card()
+        search_layout = QGridLayout(search_card)
+        search_layout.setContentsMargins(16, 14, 16, 14)
+        search_layout.setHorizontalSpacing(12)
+        search_layout.setVerticalSpacing(10)
+        search_layout.addWidget(self._label("检索条件", "section"), 0, 0, 1, 5)
+
         self.channel_input = ComboBox()
         self.channel_input.addItem("请先连接设备", None)
         self._channels: list[ChannelInfo] = []
@@ -245,43 +275,34 @@ class MainWindow(QMainWindow):
             widget.setCalendarPopup(True)
             widget.setDateTime(QDateTime(value))
 
-        self.output_input = LineEdit()
-        self.output_input.setText(str(Path.home() / "Downloads" / "hik-recordings"))
-        self.pick_dir_button = PushButton("选择目录")
-        self.pick_dir_button.clicked.connect(self._pick_output_dir)
-
-        self.test_button = PushButton("测试连接")
         self.search_button = PrimaryPushButton("检索录像")
-        self.download_button = PrimaryPushButton("下载所选")
-        self.test_button.clicked.connect(self._test_connection)
+        self.search_button.setObjectName("primaryButton")
         self.search_button.clicked.connect(self._search_recordings)
+
+        self._add_form_row(search_layout, 1, "通道", self.channel_input, span=3)
+        self._add_form_row(search_layout, 2, "开始时间", self.start_input)
+        self._add_form_row(search_layout, 2, "结束时间", self.end_input, column=2)
+        search_btn_row = QHBoxLayout()
+        search_btn_row.addStretch(1)
+        search_btn_row.addWidget(self.search_button)
+        search_layout.addLayout(search_btn_row, 3, 0, 1, 5)
+        top_row.addWidget(search_card, 3)
+
+        layout.addLayout(top_row)
+
+        # ── Table card ──
+        table_card = self._card()
+        table_layout = QVBoxLayout(table_card)
+        table_layout.setContentsMargins(14, 14, 14, 14)
+        table_header = QHBoxLayout()
+        table_header.addWidget(self._label("录像片段", "section"))
+        table_header.addStretch(1)
+        self.download_button = PrimaryPushButton("下载所选")
+        self.download_button.setObjectName("primaryButton")
         self.download_button.clicked.connect(self._download_selected)
+        table_header.addWidget(self.download_button)
+        table_layout.addLayout(table_header)
 
-        self._add_form_row(form_layout, 0, "主机", self.host_input)
-        self._add_form_row(form_layout, 0, "端口", self.port_input, column=2)
-        form_layout.addWidget(self.https_check, 0, 4)
-        self._add_form_row(form_layout, 1, "用户名", self.user_input)
-        self._add_form_row(form_layout, 1, "密码", self.password_input, column=2)
-        self._add_form_row(form_layout, 1, "通道", self.channel_input, column=4)
-        self._add_form_row(form_layout, 2, "开始时间", self.start_input)
-        self._add_form_row(form_layout, 2, "结束时间", self.end_input, column=2)
-        self._add_form_row(form_layout, 3, "保存目录", self.output_input, span=3)
-        form_layout.addWidget(self.pick_dir_button, 3, 4)
-
-        button_row = QHBoxLayout()
-        button_row.addWidget(self.test_button)
-        button_row.addWidget(self.search_button)
-        button_row.addWidget(self.download_button)
-        button_row.addStretch(1)
-        form_layout.addLayout(button_row, 4, 0, 1, 5)
-        layout.addWidget(form_card)
-
-        content_row = QHBoxLayout()
-        content_row.setSpacing(16)
-        left = self._card()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(14, 14, 14, 14)
-        left_layout.addWidget(self._label("录像片段", "section"))
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["通道", "开始", "结束", "大小", "播放 URI"])
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -293,41 +314,45 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        left_layout.addWidget(self.table)
-        content_row.addWidget(left, 3)
+        table_layout.addWidget(self.table)
+        layout.addWidget(table_card, 1)
 
-        right = self._card()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(14, 14, 14, 14)
+        # ── Bottom row: Tasks + Logs ──
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(12)
 
-        # Download task panel
-        right_layout.addWidget(self._label("下载任务", "section"))
+        task_card = self._card()
+        task_layout = QVBoxLayout(task_card)
+        task_layout.setContentsMargins(14, 14, 14, 14)
+        task_layout.addWidget(self._label("下载任务", "section"))
         self.task_list_container = QWidget()
         self.task_list_layout = QVBoxLayout(self.task_list_container)
         self.task_list_layout.setContentsMargins(0, 0, 0, 0)
         self.task_list_layout.setSpacing(4)
         self.task_list_layout.addStretch(1)
-
         scroll = QScrollArea()
         scroll.setWidget(self.task_list_container)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setMinimumHeight(120)
-        right_layout.addWidget(scroll, 1)
+        task_layout.addWidget(scroll, 1)
+        bottom_row.addWidget(task_card, 3)
 
-        # Log panel
-        right_layout.addWidget(self._label("任务日志", "section"))
+        log_card = self._card()
+        log_layout = QVBoxLayout(log_card)
+        log_layout.setContentsMargins(14, 14, 14, 14)
+        log_layout.addWidget(self._label("任务日志", "section"))
         self.log_view = TextEdit()
+        self.log_view.setObjectName("logView")
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumHeight(180)
-        right_layout.addWidget(self.log_view)
+        log_layout.addWidget(self.log_view)
+        bottom_row.addWidget(log_card, 2)
 
-        content_row.addWidget(right, 2)
-        layout.addLayout(content_row, 1)
+        layout.addLayout(bottom_row)
 
         self.setCentralWidget(root)
-        if not HAS_FLUENT:
-            self._apply_fallback_style()
+        self._apply_custom_style()
 
         # Download manager
         self.download_manager = DownloadManager(self.thread_pool, self)
@@ -344,12 +369,6 @@ class MainWindow(QMainWindow):
         return card
 
     def _label(self, text: str, kind: str) -> QLabel:
-        if HAS_FLUENT and kind == "title" and SubtitleLabel:
-            return SubtitleLabel(text)
-        if HAS_FLUENT and kind == "section" and StrongBodyLabel:
-            return StrongBodyLabel(text)
-        if HAS_FLUENT and BodyLabel:
-            return BodyLabel(text)
         label = QLabel(text)
         label.setObjectName(kind)
         return label
@@ -360,50 +379,55 @@ class MainWindow(QMainWindow):
         layout.addWidget(label_widget, row, column)
         layout.addWidget(widget, row, column + 1, 1, span)
 
-    def _apply_fallback_style(self) -> None:
+    def _apply_custom_style(self) -> None:
         app = QApplication.instance()
-        if app:
-            app.setStyle("Fusion")
-            palette = app.palette()
-            palette.setColor(QPalette.ColorRole.Highlight, QColor("#0f766e"))
-            app.setPalette(palette)
-        self.setStyleSheet(
-            """
-            QWidget#root { background: #f6f7f7; }
+        if not app:
+            return
+        extra = """
             QWidget#card {
-                background: #ffffff;
-                border: 1px solid #dde3e1;
+                background: rgba(255, 255, 255, 0.65);
+                border: 1px solid rgba(0, 0, 0, 0.08);
                 border-radius: 8px;
             }
-            QLabel#title { font-size: 24px; font-weight: 700; color: #10201d; }
-            QLabel#section { font-size: 15px; font-weight: 700; color: #10201d; }
-            QLabel#statusLabel { color: #0f766e; font-weight: 600; }
-            QTableWidget {
-                background: #ffffff;
-                border: 1px solid #dde3e1;
-                border-radius: 6px;
-                gridline-color: #e8eeec;
+            QLabel#title { font-size: 24px; font-weight: 700; }
+            QLabel#section { font-size: 15px; font-weight: 700; }
+            QLabel#statusLabel { font-weight: 600; }
+            QLabel#dirPath {
+                color: #1976d2;
+                font-size: 13px;
             }
-            QProgressBar {
-                border: 1px solid #dde3e1;
+            QLabel#dirPath:hover {
+                text-decoration: underline;
+            }
+            QPushButton#primaryButton {
+                background-color: #1976d2;
+                color: #ffffff;
+                border: 1px solid #1565c0;
                 border-radius: 4px;
-                background: #e8eeec;
-                text-align: center;
+                padding: 6px 16px;
+                font-weight: 500;
             }
-            QProgressBar::chunk {
-                background: #0f766e;
-                border-radius: 3px;
+            QPushButton#primaryButton:hover {
+                background-color: #1565c0;
             }
-            QTextEdit {
-                background: #101817;
-                color: #d7f5ed;
+            QPushButton#primaryButton:pressed {
+                background-color: #0d47a1;
+            }
+            QPushButton#primaryButton:disabled {
+                background-color: #90caf9;
+                border-color: #90caf9;
+                color: #ffffff;
+            }
+            QTextEdit#logView {
+                background: #f0f4ff;
+                color: #2c3e6b;
                 border: 0;
                 border-radius: 6px;
                 font-family: Menlo, Consolas, monospace;
                 font-size: 12px;
             }
             """
-        )
+        app.setStyleSheet(app.styleSheet() + extra)
 
     def _set_busy_state(self, busy: bool, message: str) -> None:
         self.test_button.setEnabled(not busy)
@@ -448,9 +472,10 @@ class MainWindow(QMainWindow):
         )
 
     def _pick_output_dir(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "选择保存目录", self.output_input.text())
+        directory = QFileDialog.getExistingDirectory(self, "选择保存目录", str(self._output_dir))
         if directory:
-            self.output_input.setText(directory)
+            self._output_dir = Path(directory)
+            self.output_display.setText(str(self._output_dir))
 
     def _test_connection(self) -> None:
         try:
@@ -496,7 +521,7 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             self._log(str(exc))
             return
-        directory = Path(self.output_input.text()).expanduser()
+        directory = self._output_dir.expanduser()
 
         tasks: list[DownloadTask] = []
         for row in rows:
@@ -605,7 +630,30 @@ class MainWindow(QMainWindow):
 
 
 def main() -> None:
+    import os
+    os.environ["QT_STYLE_OVERRIDE"] = "Fusion"
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+
+    # Force light palette (macOS dark mode overrides Qt defaults)
+    pal = QPalette()
+    pal.setColor(QPalette.ColorRole.Window, QColor("#ffffff"))
+    pal.setColor(QPalette.ColorRole.WindowText, QColor("#1a1a2e"))
+    pal.setColor(QPalette.ColorRole.Base, QColor("#ffffff"))
+    pal.setColor(QPalette.ColorRole.AlternateBase, QColor("#f5f7ff"))
+    pal.setColor(QPalette.ColorRole.Text, QColor("#1a1a2e"))
+    pal.setColor(QPalette.ColorRole.Button, QColor("#ffffff"))
+    pal.setColor(QPalette.ColorRole.ButtonText, QColor("#1a1a2e"))
+    pal.setColor(QPalette.ColorRole.Highlight, QColor("#1976d2"))
+    pal.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+    app.setPalette(pal)
+
+    try:
+        from qt_material import apply_stylesheet
+        apply_stylesheet(app, theme="light_cyan_500.xml", invert_secondary=False)
+    except ImportError:
+        pass
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

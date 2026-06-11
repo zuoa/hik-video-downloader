@@ -1,0 +1,87 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller hik-video-download.spec --noconfirm
+
+      - name: Create archive
+        run: |
+          cd dist
+          zip -r hik-video-download-macos.zip hik-video-download.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hik-video-download-macos
+          path: dist/hik-video-download-macos.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller hik-video-download.spec --noconfirm
+
+      - name: Create archive
+        run: |
+          Compress-Archive -Path dist\hik-video-download -DestinationPath dist\hik-video-download-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hik-video-download-windows
+          path: dist/hik-video-download-windows.zip
+
+  release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: hik-video-download-macos
+          path: ./artifacts
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: hik-video-download-windows
+          path: ./artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ./artifacts/hik-video-download-macos.zip
+            ./artifacts/hik-video-download-windows.zip
+          generate_release_notes: true

@@ -4,6 +4,12 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 block_cipher = None
 
 hidden_imports = [
+    "hik_video_download",
+    "hik_video_download.app",
+    "hik_video_download.isapi",
+    "hik_video_download.models",
+    "hik_video_download.workers",
+    "hik_video_download.ui_compat",
     "PySide6.QtWidgets",
     "PySide6.QtCore",
     "PySide6.QtGui",

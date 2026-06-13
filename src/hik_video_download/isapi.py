@@ -242,11 +242,12 @@ def _to_utc_isapi(value: datetime) -> str:
 
 
 def _filename_from_recording(recording: RecordingItem) -> str:
-    query = parse_qs(urlparse(recording.playback_uri).query)
-    name = query.get("name", [""])[0] or f"track_{recording.track_id}_{recording.start_time}_{recording.end_time}"
-    name = re.sub(r"[^0-9A-Za-z_.-]+", "_", name).strip("._") or "recording"
-    if Path(name).suffix:
-        return name
+    def _sanitize(s: str) -> str:
+        return re.sub(r'[<>:"/\\|?*]', "_", s).strip(" ._")
+
+    start = _sanitize(recording.start_time)
+    end = _sanitize(recording.end_time)
+    name = f"CH{recording.track_id}_{start}_{end}"
     return f"{name}.ps"
 
 

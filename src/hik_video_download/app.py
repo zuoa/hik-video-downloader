@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QScrollArea,
     QSizePolicy,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -49,41 +50,74 @@ class DownloadTaskItem(QWidget):
     """A single row showing one download's progress and status."""
 
     cancel_requested = Signal(str)
+    open_requested = Signal(str)
+    reveal_requested = Signal(str)
 
     def __init__(self, task: DownloadTask, parent=None) -> None:
         super().__init__(parent)
         self._task_id = task.id
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(2, 1, 2, 1)
+        layout.setSpacing(6)
 
         self.name_label = QLabel(
             f"{task.recording.start_time} ~ {task.recording.end_time}"
         )
-        self.name_label.setFixedWidth(180)
+        self.name_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.name_label.setStyleSheet("font-size: 12px;")
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.progress_bar.setFixedHeight(18)
+        self.progress_bar.setFixedSize(120, 14)
+        self.progress_bar.setTextVisible(False)
 
         self.status_label = QLabel("排队中")
-        self.status_label.setFixedWidth(60)
+        self.status_label.setFixedWidth(48)
+        self.status_label.setStyleSheet("font-size: 12px;")
 
         self.cancel_button = PushButton("取消")
-        self.cancel_button.setMinimumWidth(50)
+        self.cancel_button.setMinimumWidth(44)
+        self.cancel_button.setFixedHeight(24)
         self.cancel_button.clicked.connect(lambda: self.cancel_requested.emit(self._task_id))
+
+        self.open_button = PushButton()
+        self.open_button.setToolTip("打开文件")
+        self.open_button.setFixedSize(28, 24)
+        self.open_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
+        self.open_button.hide()
+        self.open_button.clicked.connect(lambda: self.open_requested.emit(self._task_id))
+
+        self.reveal_button = PushButton()
+        self.reveal_button.setToolTip("打开所在文件夹")
+        self.reveal_button.setFixedSize(28, 24)
+        self.reveal_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon))
+        self.reveal_button.hide()
+        self.reveal_button.clicked.connect(lambda: self.reveal_requested.emit(self._task_id))
+
+        btn_container = QWidget()
+        btn_container.setFixedWidth(104)
+        btn_layout = QHBoxLayout(btn_container)
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.setSpacing(4)
+        btn_layout.addWidget(self.cancel_button)
+        btn_layout.addWidget(self.open_button)
+        btn_layout.addWidget(self.reveal_button)
 
         layout.addWidget(self.name_label)
         layout.addWidget(self.progress_bar, 1)
         layout.addWidget(self.status_label)
-        layout.addWidget(self.cancel_button)
+        layout.addWidget(btn_container)
 
     def update_progress(self, written: int, total: int) -> None:
         if total > 0:
+            pct = min(100, int(written * 100 / total))
             self.progress_bar.setMaximum(100)
-            self.progress_bar.setValue(min(100, int(written * 100 / total)))
+            self.progress_bar.setValue(pct)
+            self.status_label.setText(f"{pct}%")
         else:
             self.progress_bar.setMaximum(0)
+            self.status_label.setText("下载中")
 
     def set_status(self, status: DownloadStatus, error: str = "") -> None:
         labels = {
@@ -95,10 +129,12 @@ class DownloadTaskItem(QWidget):
         }
         self.status_label.setText(labels.get(status, ""))
         if status in (DownloadStatus.COMPLETED, DownloadStatus.FAILED, DownloadStatus.CANCELLED):
-            self.cancel_button.setEnabled(False)
-            if status == DownloadStatus.COMPLETED:
-                self.progress_bar.setMaximum(100)
-                self.progress_bar.setValue(100)
+            self.cancel_button.hide()
+        if status == DownloadStatus.COMPLETED:
+            self.progress_bar.setMaximum(100)
+            self.progress_bar.setValue(100)
+            self.open_button.show()
+            self.reveal_button.show()
 
 
 class DownloadManager(QObject):
@@ -292,12 +328,12 @@ class MainWindow(QMainWindow):
         self.preview_button = PushButton("实时预览")
         self.preview_button.clicked.connect(self._preview_channel)
 
-        self._add_form_row(search_layout, 1, "通道", self.channel_input, span=3)
+        self._add_form_row(search_layout, 1, "通道", self.channel_input, span=2)
+        search_layout.addWidget(self.preview_button, 1, 4)
         self._add_form_row(search_layout, 2, "开始时间", self.start_input)
         self._add_form_row(search_layout, 2, "结束时间", self.end_input, column=2)
         search_btn_row = QHBoxLayout()
         search_btn_row.addStretch(1)
-        search_btn_row.addWidget(self.preview_button)
         search_btn_row.addWidget(self.search_button)
         search_layout.addLayout(search_btn_row, 3, 0, 1, 5)
         top_row.addWidget(search_card, 3)
@@ -352,7 +388,7 @@ class MainWindow(QMainWindow):
         self.task_list_container = QWidget()
         self.task_list_layout = QVBoxLayout(self.task_list_container)
         self.task_list_layout.setContentsMargins(0, 0, 0, 0)
-        self.task_list_layout.setSpacing(4)
+        self.task_list_layout.setSpacing(1)
         self.task_list_layout.addStretch(1)
         scroll = QScrollArea()
         scroll.setWidget(self.task_list_container)
@@ -674,9 +710,23 @@ class MainWindow(QMainWindow):
         self.download_manager.cancel_all()
         self._log("已取消所有下载任务")
 
+    def _open_file(self, task_id: str) -> None:
+        widget = self._task_widgets.get(task_id)
+        path = getattr(widget, "_result_path", None)
+        if path and path.exists():
+            subprocess.Popen(["open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _reveal_file(self, task_id: str) -> None:
+        widget = self._task_widgets.get(task_id)
+        path = getattr(widget, "_result_path", None)
+        if path and path.exists():
+            subprocess.Popen(["open", "-R", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     def _add_task_widget(self, task: DownloadTask) -> None:
         item = DownloadTaskItem(task)
         item.cancel_requested.connect(self.download_manager.cancel)
+        item.open_requested.connect(self._open_file)
+        item.reveal_requested.connect(self._reveal_file)
         count = self.task_list_layout.count()
         self.task_list_layout.insertWidget(count - 1, item)
         self._task_widgets[task.id] = item
@@ -741,6 +791,8 @@ class MainWindow(QMainWindow):
         widget = self._task_widgets.get(task_id)
         if widget:
             widget.set_status(DownloadStatus.COMPLETED)
+            if isinstance(result, Path):
+                widget._result_path = result
         self._log(f"下载完成：{result}")
 
     def _on_task_failed(self, task_id: str, error: str) -> None:

@@ -51,6 +51,15 @@ class HikvisionClient:
         self.session.verify = connection.verify_tls
         self.session.headers.update({"User-Agent": "hik-video-download/0.1"})
 
+    def build_rtsp_url(self, channel_id: int, sub_stream: bool = False) -> str:
+        stream_type = 2 if sub_stream else 1
+        track_id = channel_id * 100 + stream_type
+        return (
+            f"rtsp://{self.connection.username}:{self.connection.password}"
+            f"@{self.connection.host}:{self.connection.rtsp_port}"
+            f"/Streaming/channels/{track_id}"
+        )
+
     def test_connection(self) -> str:
         response = self._request("GET", "/ISAPI/System/deviceInfo")
         root = _parse_xml(response.text)

@@ -24,6 +24,7 @@ class NvrConnection:
     use_https: bool = False
     verify_tls: bool = False
     timeout: float = 12.0
+    rtsp_port: int = 554
 
     @property
     def base_url(self) -> str:

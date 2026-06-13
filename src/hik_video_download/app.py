@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 import sys
 import uuid
 from collections import deque
@@ -235,6 +237,9 @@ class MainWindow(QMainWindow):
         self.port_input.setRange(1, 65535)
         self.port_input.setValue(80)
         self.https_check = CheckBox("HTTPS")
+        self.rtsp_port_input = SpinBox()
+        self.rtsp_port_input.setRange(1, 65535)
+        self.rtsp_port_input.setValue(554)
         self.user_input = LineEdit()
         self.user_input.setText("admin")
         self.password_input = PasswordLineEdit()
@@ -248,10 +253,11 @@ class MainWindow(QMainWindow):
         conn_layout.addWidget(self.https_check, 1, 4)
         self._add_form_row(conn_layout, 2, "用户名", self.user_input)
         self._add_form_row(conn_layout, 2, "密码", self.password_input, column=2)
+        self._add_form_row(conn_layout, 3, "RTSP端口", self.rtsp_port_input)
         conn_btn_row = QHBoxLayout()
         conn_btn_row.addStretch(1)
         conn_btn_row.addWidget(self.test_button)
-        conn_layout.addLayout(conn_btn_row, 3, 0, 1, 5)
+        conn_layout.addLayout(conn_btn_row, 4, 0, 1, 5)
         top_row.addWidget(conn_card, 2)
 
         # Card 2: Search criteria
@@ -283,11 +289,15 @@ class MainWindow(QMainWindow):
         self.search_button.setObjectName("primaryButton")
         self.search_button.clicked.connect(self._search_recordings)
 
+        self.preview_button = PushButton("实时预览")
+        self.preview_button.clicked.connect(self._preview_channel)
+
         self._add_form_row(search_layout, 1, "通道", self.channel_input, span=3)
         self._add_form_row(search_layout, 2, "开始时间", self.start_input)
         self._add_form_row(search_layout, 2, "结束时间", self.end_input, column=2)
         search_btn_row = QHBoxLayout()
         search_btn_row.addStretch(1)
+        search_btn_row.addWidget(self.preview_button)
         search_btn_row.addWidget(self.search_button)
         search_layout.addLayout(search_btn_row, 3, 0, 1, 5)
         top_row.addWidget(search_card, 3)
@@ -446,6 +456,7 @@ class MainWindow(QMainWindow):
     def _set_busy_state(self, busy: bool, message: str) -> None:
         self.test_button.setEnabled(not busy)
         self.search_button.setEnabled(not busy)
+        self.preview_button.setEnabled(not busy)
         if busy:
             self.download_button.setEnabled(False)
         else:
@@ -487,6 +498,7 @@ class MainWindow(QMainWindow):
     def _load_settings(self) -> None:
         self.host_input.setText(self._settings.value("connection/host", ""))
         self.port_input.setValue(int(self._settings.value("connection/port", 80)))
+        self.rtsp_port_input.setValue(int(self._settings.value("connection/rtsp_port", 554)))
         self.user_input.setText(self._settings.value("connection/username", "admin"))
         self.password_input.setText(self._settings.value("connection/password", ""))
         self.https_check.setChecked(self._settings.value("connection/https", False, type=bool))
@@ -498,6 +510,7 @@ class MainWindow(QMainWindow):
     def _save_connection_settings(self) -> None:
         self._settings.setValue("connection/host", self.host_input.text().strip())
         self._settings.setValue("connection/port", self.port_input.value())
+        self._settings.setValue("connection/rtsp_port", self.rtsp_port_input.value())
         self._settings.setValue("connection/username", self.user_input.text().strip())
         self._settings.setValue("connection/password", self.password_input.text())
         self._settings.setValue("connection/https", self.https_check.isChecked())
@@ -528,6 +541,7 @@ class MainWindow(QMainWindow):
             username=self.user_input.text().strip(),
             password=self.password_input.text(),
             use_https=self.https_check.isChecked(),
+            rtsp_port=int(self.rtsp_port_input.value()),
         )
 
     def _query(self) -> RecordingQuery:
@@ -550,6 +564,47 @@ class MainWindow(QMainWindow):
             self._output_dir = Path(directory)
             self.output_display.setText(str(self._output_dir))
             self._settings.setValue("output_dir", str(self._output_dir))
+
+    def _find_player(self) -> str | None:
+        candidates = ["vlc", "ffplay", "mpv"]
+        for name in candidates:
+            path = shutil.which(name)
+            if path:
+                return path
+        if sys.platform == "darwin":
+            for app_path in (
+                "/Applications/VLC.app/Contents/MacOS/VLC",
+                "/Applications/IINA.app/Contents/MacOS/iina-cli",
+            ):
+                if Path(app_path).exists():
+                    return app_path
+        return None
+
+    def _preview_channel(self) -> None:
+        channel = self.channel_input.currentData()
+        if channel is None:
+            self._log("请先连接设备并选择通道")
+            return
+        try:
+            connection = self._connection()
+        except ValueError as exc:
+            self._log(str(exc))
+            return
+
+        from .isapi import HikvisionClient
+        client = HikvisionClient(connection)
+        rtsp_url = client.build_rtsp_url(channel.id)
+
+        player = self._find_player()
+        if not player:
+            self._log("未找到播放器，请安装 VLC、ffplay 或 mpv")
+            return
+
+        try:
+            subprocess.Popen([player, rtsp_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._log(f"正在打开预览：{channel.display_name} -> {player}")
+        except OSError as exc:
+            self._log(f"启动播放器失败：{exc}")
 
     def _test_connection(self) -> None:
         try:

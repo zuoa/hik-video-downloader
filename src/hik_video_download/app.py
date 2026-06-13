@@ -739,14 +739,32 @@ class MainWindow(QMainWindow):
     def _open_file(self, task_id: str) -> None:
         widget = self._task_widgets.get(task_id)
         path = getattr(widget, "_result_path", None)
-        if path and path.exists():
-            subprocess.Popen(["open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if not path or not path.exists():
+            return
+        try:
+            if sys.platform == "win32":
+                os.startfile(str(path))
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as exc:
+            self._log(f"打开文件失败：{exc}")
 
     def _reveal_file(self, task_id: str) -> None:
         widget = self._task_widgets.get(task_id)
         path = getattr(widget, "_result_path", None)
-        if path and path.exists():
-            subprocess.Popen(["open", "-R", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if not path or not path.exists():
+            return
+        try:
+            if sys.platform == "win32":
+                subprocess.Popen(["explorer", f"/select,{path}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", "-R", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.Popen(["xdg-open", str(path.parent)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as exc:
+            self._log(f"打开所在文件夹失败：{exc}")
 
     def _add_task_widget(self, task: DownloadTask) -> None:
         item = DownloadTaskItem(task)

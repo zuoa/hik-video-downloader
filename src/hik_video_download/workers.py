@@ -68,3 +68,8 @@ def download_worker(task: DownloadTask) -> TaskWorker:
 
     return TaskWorker(job, task_id=task.id)
 
+
+def check_update_worker(current_version: str) -> TaskWorker:
+    from .updater import check_for_update
+    return TaskWorker(lambda _signals: check_for_update(current_version))
+

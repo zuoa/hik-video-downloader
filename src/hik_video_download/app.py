@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+import webbrowser
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
     QScrollArea,
     QSizePolicy,
@@ -31,7 +33,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from . import __version__
 from .models import ChannelInfo, DownloadStatus, DownloadTask, NvrConnection, RecordingItem, RecordingQuery
+from .updater import GITHUB_RELEASES_URL
 from .ui_compat import (
     CardWidget,
     CheckBox,
@@ -230,6 +234,8 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._load_settings()
         self._set_idle_state()
+        if self._check_update_on_startup:
+            self._start_update_check()
 
     def _build_ui(self) -> None:
         root = QWidget(self)
@@ -241,6 +247,9 @@ class MainWindow(QMainWindow):
         # ── Title bar with download directory config ──
         title_row = QHBoxLayout()
         title_row.addWidget(self._label("海康 NVR 录像下载", "title"))
+        self.version_label = QLabel(f"v{__version__}")
+        self.version_label.setObjectName("versionLabel")
+        title_row.addWidget(self.version_label)
         title_row.addStretch(1)
         dir_label = self._label("保存目录", "body")
         title_row.addWidget(dir_label)
@@ -451,6 +460,11 @@ class MainWindow(QMainWindow):
                 border-radius: 8px;
             }
             QLabel#title { font-size: 24px; font-weight: 700; }
+            QLabel#versionLabel {
+                color: rgba(0, 0, 0, 0.45);
+                font-size: 13px;
+                padding-top: 6px;
+            }
             QLabel#section { font-size: 15px; font-weight: 700; }
             QLabel#statusLabel { font-weight: 600; }
             QLabel#dirPath {
@@ -543,6 +557,9 @@ class MainWindow(QMainWindow):
         if saved_dir:
             self._output_dir = Path(saved_dir)
             self.output_display.setText(str(self._output_dir))
+        self._check_update_on_startup = self._settings.value(
+            "update/check_on_startup", True, type=bool
+        )
 
     def _save_connection_settings(self) -> None:
         self._settings.setValue("connection/host", self.host_input.text().strip())
@@ -826,6 +843,28 @@ class MainWindow(QMainWindow):
 
     def _log(self, message: str) -> None:
         self.log_view.append(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
+
+    def _start_update_check(self) -> None:
+        from .workers import check_update_worker
+        worker = check_update_worker(__version__)
+        worker.signals.result.connect(self._on_update_checked)
+        worker.signals.error.connect(lambda _msg: None)
+        self.thread_pool.start(worker)
+
+    def _on_update_checked(self, result: object) -> None:
+        from .updater import UpdateInfo
+        if not isinstance(result, UpdateInfo) or not result.has_update:
+            return
+        latest = result.latest_version or ""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("发现新版本")
+        box.setText(f"当前版本 v{__version__}\n最新版本 v{latest}\n\n是否前往下载？")
+        open_btn = box.addButton("打开下载页", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("稍后", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is open_btn:
+            webbrowser.open(GITHUB_RELEASES_URL)
 
 
 def main() -> None:

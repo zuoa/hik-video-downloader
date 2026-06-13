@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -614,6 +615,14 @@ class MainWindow(QMainWindow):
             ):
                 if Path(app_path).exists():
                     return app_path
+        elif sys.platform == "win32":
+            for env_var in ("ProgramFiles", "ProgramFiles(x86)"):
+                base = os.environ.get(env_var)
+                if not base:
+                    continue
+                vlc_path = Path(base) / "VideoLAN" / "VLC" / "vlc.exe"
+                if vlc_path.exists():
+                    return str(vlc_path)
         return None
 
     def _preview_channel(self) -> None:

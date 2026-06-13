@@ -6,7 +6,7 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QDateTime, QObject, QThreadPool, Qt, Signal
+from PySide6.QtCore import QDateTime, QObject, QSettings, QThreadPool, Qt, Signal
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QApplication,
@@ -68,7 +68,7 @@ class DownloadTaskItem(QWidget):
         self.status_label.setFixedWidth(60)
 
         self.cancel_button = PushButton("取消")
-        self.cancel_button.setFixedWidth(50)
+        self.cancel_button.setMinimumWidth(50)
         self.cancel_button.clicked.connect(lambda: self.cancel_requested.emit(self._task_id))
 
         layout.addWidget(self.name_label)
@@ -187,7 +187,9 @@ class MainWindow(QMainWindow):
         self._task_widgets: dict[str, DownloadTaskItem] = {}
         self._output_dir = Path.home() / "Downloads" / "hik-recordings"
 
+        self._settings = QSettings("hik-video-downloader", "hik-video-downloader")
         self._build_ui()
+        self._load_settings()
         self._set_idle_state()
 
     def _build_ui(self) -> None:
@@ -264,16 +266,18 @@ class MainWindow(QMainWindow):
         self.channel_input.addItem("请先连接设备", None)
         self._channels: list[ChannelInfo] = []
 
-        from datetime import timedelta
-        now = datetime.now()
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         self.start_input = DateTimeEdit()
+        self.start_input.setCalendarPopup(True)
+        self.start_input.setDateTime(QDateTime(today))
         self.end_input = DateTimeEdit()
-        for widget, value in (
-            (self.start_input, now - timedelta(hours=1)),
-            (self.end_input, now),
-        ):
-            widget.setCalendarPopup(True)
-            widget.setDateTime(QDateTime(value))
+        self.end_input.setCalendarPopup(True)
+        self.end_input.setDateTime(QDateTime(today.replace(hour=23, minute=59, second=59)))
+
+        self._prev_start_date = self.start_input.date()
+        self._prev_end_date = self.end_input.date()
+        self.start_input.dateTimeChanged.connect(self._on_start_date_picked)
+        self.end_input.dateTimeChanged.connect(self._on_end_date_picked)
 
         self.search_button = PrimaryPushButton("检索录像")
         self.search_button.setObjectName("primaryButton")
@@ -328,7 +332,13 @@ class MainWindow(QMainWindow):
         task_card = self._card()
         task_layout = QVBoxLayout(task_card)
         task_layout.setContentsMargins(14, 14, 14, 14)
-        task_layout.addWidget(self._label("下载任务", "section"))
+        task_header = QHBoxLayout()
+        task_header.addWidget(self._label("下载任务", "section"))
+        task_header.addStretch(1)
+        self.cancel_all_button = PushButton("全部取消")
+        self.cancel_all_button.clicked.connect(self._cancel_all_downloads)
+        task_header.addWidget(self.cancel_all_button)
+        task_layout.addLayout(task_header)
         self.task_list_container = QWidget()
         self.task_list_layout = QVBoxLayout(self.task_list_container)
         self.task_list_layout.setContentsMargins(0, 0, 0, 0)
@@ -474,6 +484,40 @@ class MainWindow(QMainWindow):
     def _checked_count(self) -> int:
         return len(self._checked_rows())
 
+    def _load_settings(self) -> None:
+        self.host_input.setText(self._settings.value("connection/host", ""))
+        self.port_input.setValue(int(self._settings.value("connection/port", 80)))
+        self.user_input.setText(self._settings.value("connection/username", "admin"))
+        self.password_input.setText(self._settings.value("connection/password", ""))
+        self.https_check.setChecked(self._settings.value("connection/https", False, type=bool))
+        saved_dir = self._settings.value("output_dir", "")
+        if saved_dir:
+            self._output_dir = Path(saved_dir)
+            self.output_display.setText(str(self._output_dir))
+
+    def _save_connection_settings(self) -> None:
+        self._settings.setValue("connection/host", self.host_input.text().strip())
+        self._settings.setValue("connection/port", self.port_input.value())
+        self._settings.setValue("connection/username", self.user_input.text().strip())
+        self._settings.setValue("connection/password", self.password_input.text())
+        self._settings.setValue("connection/https", self.https_check.isChecked())
+        self._settings.setValue("output_dir", str(self._output_dir))
+
+    def _on_start_date_picked(self, dt: QDateTime) -> None:
+        if dt.date() != self._prev_start_date:
+            self.start_input.blockSignals(True)
+            self.start_input.setTime(QDateTime(dt.date()).time())
+            self.start_input.blockSignals(False)
+        self._prev_start_date = self.start_input.date()
+
+    def _on_end_date_picked(self, dt: QDateTime) -> None:
+        if dt.date() != self._prev_end_date:
+            self.end_input.blockSignals(True)
+            t = QDateTime(dt.date()).addSecs(86399).time()
+            self.end_input.setTime(t)
+            self.end_input.blockSignals(False)
+        self._prev_end_date = self.end_input.date()
+
     def _connection(self) -> NvrConnection:
         host = self.host_input.text().strip()
         if not host:
@@ -505,6 +549,7 @@ class MainWindow(QMainWindow):
         if directory:
             self._output_dir = Path(directory)
             self.output_display.setText(str(self._output_dir))
+            self._settings.setValue("output_dir", str(self._output_dir))
 
     def _test_connection(self) -> None:
         try:
@@ -570,6 +615,10 @@ class MainWindow(QMainWindow):
         self._log(f"已添加 {len(tasks)} 个下载任务（最多 {DownloadManager.MAX_CONCURRENT} 个并发）")
         self.download_button.setEnabled(False)
 
+    def _cancel_all_downloads(self) -> None:
+        self.download_manager.cancel_all()
+        self._log("已取消所有下载任务")
+
     def _add_task_widget(self, task: DownloadTask) -> None:
         item = DownloadTaskItem(task)
         item.cancel_requested.connect(self.download_manager.cancel)
@@ -580,6 +629,7 @@ class MainWindow(QMainWindow):
     def _on_connection_ok(self, result: object) -> None:
         self.connection_status.setText("连接成功")
         self._log(f"连接成功：{result}")
+        self._save_connection_settings()
 
     def _on_channels_loaded(self, result: object) -> None:
         channels = list(result) if isinstance(result, list) else []

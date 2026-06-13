@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterable
 from urllib.parse import parse_qs, urlparse
@@ -182,8 +182,8 @@ def parse_search_result(xml_text: str) -> list[RecordingItem]:
 
 
 def _build_search_xml(query: RecordingQuery) -> str:
-    start = _to_utc_isapi(query.start_time)
-    end = _to_utc_isapi(query.end_time)
+    start = _to_isapi_time(query.start_time)
+    end = _to_isapi_time(query.end_time)
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <CMSearchDescription>
   <searchID>{uuid.uuid4()}</searchID>
@@ -235,10 +235,15 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
-def _to_utc_isapi(value: datetime) -> str:
-    if value.tzinfo is None:
-        value = value.astimezone()
-    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _to_isapi_time(value: datetime) -> str:
+    """Format a datetime as the NVR expects: local wall-clock time in ISO form.
+
+    Hikvision NVRs interpret ISAPI timestamps against the device's own clock,
+    which is normally set to the local timezone. We must NOT convert to UTC,
+    otherwise a query for "today 00:00" in UTC+8 arrives as "yesterday 16:00"
+    and the device returns the wrong day's recordings.
+    """
+    return value.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _filename_from_recording(recording: RecordingItem) -> str:

@@ -1,21 +1,21 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 from hik_video_download.isapi import _build_search_xml, parse_search_result
 from hik_video_download.models import RecordingQuery
 
 
-def test_build_search_xml_uses_track_and_utc_time() -> None:
+def test_build_search_xml_uses_track_and_local_time() -> None:
     query = RecordingQuery(
         track_id=101,
-        start_time=datetime(2026, 1, 14, 12, 0, tzinfo=timezone.utc),
-        end_time=datetime(2026, 1, 14, 12, 5, tzinfo=timezone.utc),
+        start_time=datetime(2026, 1, 14, 12, 0),
+        end_time=datetime(2026, 1, 14, 12, 5),
     )
 
     xml = _build_search_xml(query)
 
     assert "<trackID>101</trackID>" in xml
-    assert "<startTime>2026-01-14T12:00:00Z</startTime>" in xml
-    assert "<endTime>2026-01-14T12:05:00Z</endTime>" in xml
+    assert "<startTime>2026-01-14T12:00:00</startTime>" in xml
+    assert "<endTime>2026-01-14T12:05:00</endTime>" in xml
     assert "<searchResultPostion>0</searchResultPostion>" in xml
 
 

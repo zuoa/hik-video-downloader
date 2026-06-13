@@ -68,12 +68,15 @@ class HikvisionClient:
         for path in (
             "/ISAPI/ContentMgmt/InputChannels/channels",
             "/ISAPI/System/Video/inputs/channels",
+            "/ISAPI/ContentMgmt/Streaming/channels",
         ):
             try:
                 response = self._request("GET", path)
             except HikvisionError:
                 continue
-            return _parse_channels(response.text)
+            channels = _parse_channels(response.text)
+            if channels:
+                return channels
         return []
 
     def search_recordings(self, query: RecordingQuery) -> list[RecordingItem]:
@@ -269,6 +272,7 @@ def _xml_escape(value: str) -> str:
 def _parse_channels(xml_text: str) -> list[ChannelInfo]:
     root = _parse_xml(xml_text)
     channels: list[ChannelInfo] = []
+    seen: set[int] = set()
     for elem in root.iter():
         local = _local_name(elem.tag)
         if local in ("InputChannel", "VideoInputChannel", "channel"):
@@ -276,5 +280,13 @@ def _parse_channels(xml_text: str) -> list[ChannelInfo]:
             name = _find_text(elem, "name") or ""
             if cid:
                 channels.append(ChannelInfo(id=int(cid), name=name))
+        elif local == "StreamingChannel":
+            cid = _find_text(elem, "id")
+            name = _find_text(elem, "channelName") or _find_text(elem, "name") or ""
+            if cid:
+                channel_id = int(cid) // 100
+                if channel_id not in seen:
+                    seen.add(channel_id)
+                    channels.append(ChannelInfo(id=channel_id, name=name))
     return channels
 

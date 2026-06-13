@@ -303,17 +303,21 @@ class MainWindow(QMainWindow):
         table_header.addWidget(self.download_button)
         table_layout.addLayout(table_header)
 
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["通道", "开始", "结束", "大小", "播放 URI"])
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(["选择", "通道", "开始", "结束", "大小", "播放 URI"])
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
-        self.table.itemSelectionChanged.connect(self._update_download_button)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+
+        self._select_all_check = CheckBox("全选")
+        self._select_all_check.stateChanged.connect(self._on_select_all)
+        table_header.addWidget(self._select_all_check)
         table_layout.addWidget(self.table)
         layout.addWidget(table_card, 1)
 
@@ -432,18 +436,43 @@ class MainWindow(QMainWindow):
     def _set_busy_state(self, busy: bool, message: str) -> None:
         self.test_button.setEnabled(not busy)
         self.search_button.setEnabled(not busy)
-        self.download_button.setEnabled(not busy and bool(self.recordings))
+        if busy:
+            self.download_button.setEnabled(False)
+        else:
+            self._update_download_button()
         self.connection_status.setText(message)
 
     def _set_idle_state(self) -> None:
         self._set_busy_state(False, self.connection_status.text())
 
     def _update_download_button(self) -> None:
-        count = len(self.table.selectionModel().selectedRows())
+        count = self._checked_count()
         if count > 0:
             self.download_button.setText(f"下载所选 ({count})")
         else:
             self.download_button.setText("下载所选")
+        self.download_button.setEnabled(count > 0)
+
+    def _on_select_all(self, state: int) -> None:
+        checked = state == Qt.CheckState.Checked.value
+        for row in range(self.table.rowCount()):
+            widget = self.table.cellWidget(row, 0)
+            if isinstance(widget, CheckBox):
+                widget.blockSignals(True)
+                widget.setChecked(checked)
+                widget.blockSignals(False)
+        self._update_download_button()
+
+    def _checked_rows(self) -> list[int]:
+        rows = []
+        for row in range(self.table.rowCount()):
+            widget = self.table.cellWidget(row, 0)
+            if isinstance(widget, CheckBox) and widget.isChecked():
+                rows.append(row)
+        return rows
+
+    def _checked_count(self) -> int:
+        return len(self._checked_rows())
 
     def _connection(self) -> NvrConnection:
         host = self.host_input.text().strip()
@@ -512,9 +541,9 @@ class MainWindow(QMainWindow):
         self.thread_pool.start(worker)
 
     def _download_selected(self) -> None:
-        rows = sorted({idx.row() for idx in self.table.selectionModel().selectedRows()})
+        rows = sorted(self._checked_rows())
         if not rows:
-            self._log("请先选择录像片段")
+            self._log("请先勾选录像片段")
             return
         try:
             connection = self._connection()
@@ -569,14 +598,18 @@ class MainWindow(QMainWindow):
     def _on_search_result(self, result: object) -> None:
         self.recordings = list(result) if isinstance(result, list) else []
         self.table.setRowCount(0)
+        self._select_all_check.setChecked(False)
         for recording in self.recordings:
             self._append_recording(recording)
-        self.download_button.setEnabled(bool(self.recordings))
+        self.download_button.setEnabled(False)
         self._log(f"检索完成：找到 {len(self.recordings)} 条录像")
 
     def _append_recording(self, recording: RecordingItem) -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
+        check = CheckBox()
+        check.stateChanged.connect(self._update_download_button)
+        self.table.setCellWidget(row, 0, check)
         values = [
             recording.track_id,
             recording.start_time,
@@ -587,7 +620,7 @@ class MainWindow(QMainWindow):
         for column, value in enumerate(values):
             item = QTableWidgetItem(value)
             item.setFlags(item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            self.table.setItem(row, column, item)
+            self.table.setItem(row, column + 1, item)
 
     def _on_task_started(self, task_id: str) -> None:
         widget = self._task_widgets.get(task_id)
@@ -618,7 +651,7 @@ class MainWindow(QMainWindow):
         self._log("下载已取消")
 
     def _on_all_downloads_done(self) -> None:
-        self.download_button.setEnabled(bool(self.recordings))
+        self._update_download_button()
         self._log("所有下载任务已处理完毕")
 
     def _on_task_error(self, message: str) -> None:
